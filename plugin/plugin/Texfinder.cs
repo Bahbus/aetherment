@@ -9,7 +9,7 @@ using TerraFX.Interop.DirectX;
 namespace Aetherment;
 
 public class TexFinder: IDisposable {
-	public bool shoulddraw = true;
+	public bool shoulddraw = false;
 	private bool hr1 = true;
 	private int selected = 0;
 	private bool locked = false;
