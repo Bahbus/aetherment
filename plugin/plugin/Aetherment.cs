@@ -206,6 +206,7 @@ public class Aetherment: IDalamudPlugin {
 		
 		penumbra.Dispose();
 		uicolor.Dispose();
+		texfinder.Dispose();
 		
 		Commands.RemoveHandler(maincommand);
 		Commands.RemoveHandler(texfindercommand);
@@ -315,7 +316,7 @@ public class Aetherment: IDalamudPlugin {
 	
 	private void OnCommand(string cmd, string args) {
 		if(cmd == texfindercommand) {
-			texfinder.shouldDraw = !texfinder.shouldDraw;
+			texfinder.shoulddraw = !texfinder.shoulddraw;
 			return;
 		}
 		
