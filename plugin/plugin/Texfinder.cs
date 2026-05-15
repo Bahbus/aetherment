@@ -16,10 +16,9 @@ public class TexFinder: IDisposable {
 	private bool lastheld = false;
 	
 	private List<List<Texture>> nodes;
-	private Dictionary<uint, ResourceView> texture_cache;
+	// private Dictionary<uint, ResourceView> texture_cache;
 	
-	private struct Matrix2x2(float M00, float M01, float M10, float M11)
-	{
+	private struct Matrix2x2(float M00, float M01, float M10, float M11) {
 		public float M00 = M00;
 		public float M01 = M01;
 		public float M10 = M10;
@@ -54,7 +53,8 @@ public class TexFinder: IDisposable {
 	
 	private struct Texture {
 		public string path;
-		public uint texture;
+		// public uint texture;
+		public Dalamud.Interface.Textures.ISharedImmediateTexture? texture;
 		public Matrix2x2 screen_matrix;
 		public Vector2 screen_pos;
 		public Vector2 size;
@@ -75,17 +75,17 @@ public class TexFinder: IDisposable {
 	
 	public unsafe TexFinder() {
 		nodes = new();
-		texture_cache = new();
+		// texture_cache = new();
 	}
 	
 	public unsafe void Dispose() {
-		lock(texture_cache) {
-			foreach(var (_, resource) in texture_cache) {
-				resource.view->Release();
-			}
-			
-			texture_cache.Clear();
-		}
+		// lock(texture_cache) {
+		// 	foreach(var (_, resource) in texture_cache) {
+		// 		resource.view->Release();
+		// 	}
+		// 	
+		// 	texture_cache.Clear();
+		// }
 	}
 	
 	public void OpenConf() {
@@ -93,32 +93,32 @@ public class TexFinder: IDisposable {
 	}
 	
 	public void Draw() {
-		// texture cache maintance
-		lock(texture_cache) {
-			var time = (double)Stopwatch.GetTimestamp() / Stopwatch.Frequency;
-			var remove = new List<uint>();
-			foreach(var (key, resource) in texture_cache) {
-				if(time - resource.last_used > 5.0) {
-					remove.Add(key);
-				}
-			}
-			
-			foreach(var key in remove) {
-				texture_cache.Remove(key);
-			}
-		}
+		// // texture cache maintance
+		// lock(texture_cache) {
+		// 	var time = (double)Stopwatch.GetTimestamp() / Stopwatch.Frequency;
+		// 	var remove = new List<uint>();
+		// 	foreach(var (key, resource) in texture_cache) {
+		// 		if(time - resource.last_used > 5.0) {
+		// 			remove.Add(key);
+		// 		}
+		// 	}
+		// 	
+		// 	foreach(var key in remove) {
+		// 		texture_cache.Remove(key);
+		// 	}
+		// }
 		
 		if(!shoulddraw)
 			return;
 		
-		// update last used
-		foreach(var nodes2 in nodes) {
-			foreach(var node in nodes2) {
-				if(texture_cache.TryGetValue(node.texture, out var view)) {
-					view.last_used = (double)Stopwatch.GetTimestamp() / Stopwatch.Frequency;
-				}
-			}
-		}
+		// // update last used
+		// foreach(var nodes2 in nodes) {
+		// 	foreach(var node in nodes2) {
+		// 		if(texture_cache.TryGetValue(node.texture, out var view)) {
+		// 			view.last_used = (double)Stopwatch.GetTimestamp() / Stopwatch.Frequency;
+		// 		}
+		// 	}
+		// }
 		
 		// ui
 		if(ImGui.GetIO().KeyCtrl && ImGui.GetIO().KeyShift) {
@@ -137,7 +137,7 @@ public class TexFinder: IDisposable {
 		var draw2 = ImGui.GetForegroundDrawList();
 		var padding = ImGui.GetStyle().FramePadding;
 		
-		ImGui.Text($"[Debug] Texture cache size: {texture_cache.Count}");
+		// ImGui.Text($"[Debug] Texture cache size: {texture_cache.Count}");
 		
 		ImGui.Checkbox("High res", ref hr1);
 		ImGui.Text($"{(locked ? "Locked" : "Unlocked")} (Shift + Ctrl to toggle)");
@@ -196,8 +196,10 @@ public class TexFinder: IDisposable {
 				var ratio = Math.Min(s.X / texture.texture_size.X, s.Y / texture.texture_size.Y);
 				var pos = ImGui.GetCursorScreenPos();
 				var imgsize = new Vector2(texture.texture_size.X, texture.texture_size.Y) * ratio;
-				if(texture_cache.TryGetValue(texture.texture, out var tex))
-					draw.AddImage(tex.handle, pos, pos + imgsize);
+				// if(texture_cache.TryGetValue(texture.texture, out var tex))
+				// 	draw.AddImage(tex.handle, pos, pos + imgsize);
+				if(texture.texture != null && texture.texture.TryGetWrap(out var tex, out var _))
+					draw.AddImage(tex.Handle, pos, pos + imgsize);
 				
 				// part highlight
 				var scale = hr1 ? 2 : 1;
@@ -291,13 +293,17 @@ public class TexFinder: IDisposable {
 				var texture = tex.TextureType == TextureType.Resource ?
 					tex.Resource->KernelTextureObject :
 					tex.KernelTexture;
+				var path = tex.TextureType == TextureType.Resource ?
+					tex.Resource->TexFileResourceHandle->ResourceHandle.FileName.ToString() :
+					"";
 				
 				if(texture != null) {
-					var tex_key = CacheTexture(tex);
+					// var tex_key = CacheTexture(tex);
 					
 					nodes.Add([new() {
-						path = tex.Resource->TexFileResourceHandle->ResourceHandle.FileName.ToString(),
-						texture = tex_key,
+						path = path,
+						// texture = tex_key,
+						texture = GetTexture(path),
 						screen_matrix = screen_matrix,
 						screen_pos = screen_pos,
 						size = new(node->Width, node->Height),
@@ -321,13 +327,17 @@ public class TexFinder: IDisposable {
 					var texture = tex.TextureType == TextureType.Resource ?
 						tex.Resource->KernelTextureObject :
 						tex.KernelTexture;
+					var path = tex.TextureType == TextureType.Resource ?
+						tex.Resource->TexFileResourceHandle->ResourceHandle.FileName.ToString() :
+						"";
 					
 					if(texture != null) {
-						var tex_key = CacheTexture(tex);
+						// var tex_key = CacheTexture(tex);
 						
 						textures.Add(new() {
-							path = tex.Resource->TexFileResourceHandle->ResourceHandle.FileName.ToString(),
-							texture = tex_key,
+							path = path,
+							// texture = tex_key,
+							texture = GetTexture(path),
 							screen_matrix = screen_matrix,
 							screen_pos = screen_pos,
 							size = new(node->Width, node->Height),
@@ -352,47 +362,56 @@ public class TexFinder: IDisposable {
 		}
 	}
 	
-	private unsafe uint CacheTexture(AtkTexture tex) {
-		var key = tex.TextureType == TextureType.Resource ?
-			(uint)tex.Resource->TexFileResourceHandle->ResourceHandle.FileName.ToString().GetHashCode() :
-			1;
-		
-		if(texture_cache.ContainsKey(key))
-			return key;
-		
-		// clone the resource so that we dont crash if the game decides to clean it up while we are locked
-		var device = (ID3D11Device*)Aetherment.Interface.UiBuilder.DeviceHandle;
-		ID3D11DeviceContext* context;
-		device->GetImmediateContext(&context);
-		
-		var texture = tex.TextureType == TextureType.Resource ?
-			tex.Resource->KernelTextureObject :
-			tex.KernelTexture;
-		
-		var og_view = (ID3D11ShaderResourceView*)texture->D3D11ShaderResourceView;
-		ID3D11Resource* og_resource;
-		og_view->GetResource(&og_resource);
-		var guid = typeof(ID3D11Texture2D).GUID;
-		ID3D11Texture2D* og_texture;
-		og_resource->QueryInterface(&guid, (void**)&og_texture);
-		D3D11_TEXTURE2D_DESC desc;
-		og_texture->GetDesc(&desc);
-		
-		ID3D11Texture2D* new_texture;
-		device->CreateTexture2D(&desc, null, &new_texture);
-		context->CopyResource((ID3D11Resource*)new_texture, og_resource);
-		
-		ID3D11ShaderResourceView* new_view;
-		device->CreateShaderResourceView((ID3D11Resource*)new_texture, null, &new_view);
-		
-		lock(texture_cache) {
-			texture_cache.Add(key, new() {
-				view = new_view,
-				handle = new ImTextureID(new_view),
-				last_used = (double)Stopwatch.GetTimestamp() / Stopwatch.Frequency,
-			});
-		}
-		
-		return key;
+	private static Dalamud.Interface.Textures.ISharedImmediateTexture? GetTexture(string path) {
+		if(path.Length == 0)
+			return null;
+		else if(path[1] == ':')
+			return Aetherment.Textures.GetFromFile(path);
+		else
+			return Aetherment.Textures.GetFromGame(path);
 	}
+	
+	// private unsafe uint CacheTexture(AtkTexture tex) {
+	// 	var key = tex.TextureType == TextureType.Resource ?
+	// 		(uint)tex.Resource->TexFileResourceHandle->ResourceHandle.FileName.ToString().GetHashCode() :
+	// 		1;
+	// 	
+	// 	if(texture_cache.ContainsKey(key))
+	// 		return key;
+	// 	
+	// 	// clone the resource so that we dont crash if the game decides to clean it up while we are locked
+	// 	var device = (ID3D11Device*)Aetherment.Interface.UiBuilder.DeviceHandle;
+	// 	ID3D11DeviceContext* context;
+	// 	device->GetImmediateContext(&context);
+	// 	
+	// 	var texture = tex.TextureType == TextureType.Resource ?
+	// 		tex.Resource->KernelTextureObject :
+	// 		tex.KernelTexture;
+	// 	
+	// 	var og_view = (ID3D11ShaderResourceView*)texture->D3D11ShaderResourceView;
+	// 	ID3D11Resource* og_resource;
+	// 	og_view->GetResource(&og_resource);
+	// 	var guid = typeof(ID3D11Texture2D).GUID;
+	// 	ID3D11Texture2D* og_texture;
+	// 	og_resource->QueryInterface(&guid, (void**)&og_texture);
+	// 	D3D11_TEXTURE2D_DESC desc;
+	// 	og_texture->GetDesc(&desc);
+	// 	
+	// 	ID3D11Texture2D* new_texture;
+	// 	device->CreateTexture2D(&desc, null, &new_texture);
+	// 	context->CopyResource((ID3D11Resource*)new_texture, og_resource);
+	// 	
+	// 	ID3D11ShaderResourceView* new_view;
+	// 	device->CreateShaderResourceView((ID3D11Resource*)new_texture, null, &new_view);
+	// 	
+	// 	lock(texture_cache) {
+	// 		texture_cache.Add(key, new() {
+	// 			view = new_view,
+	// 			handle = new ImTextureID(new_view),
+	// 			last_used = (double)Stopwatch.GetTimestamp() / Stopwatch.Frequency,
+	// 		});
+	// 	}
+	// 	
+	// 	return key;
+	// }
 }
