@@ -67,11 +67,11 @@ public class TexFinder: IDisposable {
 		public float ninegrid_rightoffset;
 	}
 	
-	private unsafe class ResourceView {
-		public ID3D11ShaderResourceView* view;
-		public ImTextureID handle;
-		public double last_used;
-	}
+	// private unsafe class ResourceView {
+	// 	public ID3D11ShaderResourceView* view;
+	// 	public ImTextureID handle;
+	// 	public double last_used;
+	// }
 	
 	public unsafe TexFinder() {
 		nodes = new();
