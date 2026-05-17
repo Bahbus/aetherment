@@ -149,9 +149,8 @@ impl Mods {
 		
 		ui.add_space(16.0);
 		
-		for v in self.mod_manager.metas.iter() {
-			let mod_id = v.key();
-			let meta = v.value();
+		for mod_id in self.mod_manager.aeth_mods_sorted.read().unwrap().iter() {
+			let Some(meta) = self.mod_manager.metas.get(mod_id) else {continue};
 			
 			ui.push_id(mod_id, |ui| {
 				if !crate::backend().get_mod_enabled(mod_id, &config.config.active_collection) {
@@ -249,7 +248,11 @@ impl Mods {
 		check_presets(&meta.presets);
 		check_presets(&presets);
 		
-		ui.combo(&selected_preset, "Preset", |ui| {
+		egui::ComboBox::from_label("Preset")
+			.height(300.0)
+			.selected_text(&selected_preset)
+			.close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+			.show_ui(ui, |ui| {
 			let mut set_settings = |values: &HashMap<String, crate::modman::settings::Value>| {
 				for (name, value) in settings.iter_mut() {
 					*value = values.get(name).map_or_else(|| crate::modman::settings::Value::from_meta_option(meta.options.options_iter().find(|v| v.name == *name).unwrap()), |v| v.to_owned());
@@ -261,12 +264,14 @@ impl Mods {
 			if meta.presets.len() == 0 {
 				if ui.selectable_label("Default" == selected_preset, "Default").clicked() {
 					set_settings(&HashMap::new());
+					ui.memory_mut(|v| v.close_popup());
 				}
 			}
 			
 			for p in &meta.presets {
 				if ui.selectable_label(p.name == selected_preset, &p.name).clicked() {
 					set_settings(&p.settings);
+					ui.memory_mut(|v| v.close_popup());
 				}
 			}
 			
@@ -291,6 +296,7 @@ impl Mods {
 						
 						if ui.selectable_label(p.name == selected_preset, &p.name).clicked() {
 							set_settings(&p.settings);
+							ui.memory_mut(|v| v.close_popup());
 						}
 					});
 				});

@@ -6,6 +6,7 @@ using FFXIVClientStructs.FFXIV.Component.GUI;
 
 namespace Aetherment;
 
+// TODO: can cause a crash when we clear the UIColors if the game touches it at the same time (i think?)
 public class UiColor: IDisposable {
 	[StructLayout(LayoutKind.Sequential, Pack = 1)]
 	public struct Color {
@@ -82,7 +83,7 @@ public class UiColor: IDisposable {
 	private unsafe void StoreOriginals() {
 		var c = AtkStage.Instance()->AtkUIColorHolder;
 		originalTheme = c->ActiveColorThemeType;
-		originalColors = [];
+		originalColors.Clear();
 		for(var i = 0; i < c->UIColors.Count; i++) {
 			originalColors.Add(c->UIColors[i]);
 		}

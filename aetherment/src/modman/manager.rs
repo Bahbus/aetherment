@@ -8,6 +8,7 @@ pub struct Manager {
 	pub settings: Arc<DashMap<Arc<str>, super::settings::Settings>>,
 	pub settings_remote: Arc<DashMap<Arc<str>, crate::remote::settings::Settings>>,
 	pub aeth_mods: Arc<DashSet<Arc<str>>>,
+	pub aeth_mods_sorted: Arc<RwLock<Vec<Arc<str>>>>,
 	
 	last_viewed: Arc<RwLock<Instant>>,
 	last_interacted: Arc<RwLock<Instant>>,
@@ -21,6 +22,7 @@ impl Manager {
 			settings: Arc::new(DashMap::new()),
 			settings_remote: Arc::new(DashMap::new()),
 			aeth_mods: Arc::new(DashSet::new()),
+			aeth_mods_sorted: Arc::new(RwLock::new(Vec::new())),
 			
 			last_viewed: Arc::new(RwLock::new(Instant::now())),
 			last_interacted: Arc::new(RwLock::new(Instant::now())),
@@ -64,6 +66,14 @@ impl Manager {
 				self.aeth_mods.insert(m.clone());
 			}
 		}
+		
+		let mut aeth_mods_sorted = self.aeth_mods_sorted.write().unwrap();
+		aeth_mods_sorted.clear();
+		for m in self.aeth_mods.iter() {
+			aeth_mods_sorted.push(m.key().clone());
+		}
+		aeth_mods_sorted.sort_unstable_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
+		drop(aeth_mods_sorted);
 		
 		let config = crate::config();
 		if !self.collections.contains_key(&config.config.active_collection) && self.collections.len() > 0 {

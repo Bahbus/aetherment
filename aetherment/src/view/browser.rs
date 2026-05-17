@@ -503,9 +503,9 @@ impl super::View for Browser {
 									}
 								});
 							}
-							
-							ui.spacer();
 						});
+						
+						ui.spacer();
 						
 						if entry.description_format == crate::remote::TextFormatting::Markdown {
 							ui.userspace_loaders(|ui| {

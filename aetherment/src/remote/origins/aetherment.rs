@@ -67,24 +67,27 @@ impl RemoteOrigin for Aetherment {
 	}
 	
 	fn home(&self) -> Result<Vec<HomeResultEntry>, Error> {
+		let mut entries = crate::http::get(&format!("{REMOTE_URL}/mods"))
+			.call()?
+			.into_body()
+			.read_json::<Vec<RemoteModEntry>>()?
+			.into_iter()
+			.map(|v| ModEntry {
+				name: v.name,
+				author: v.author,
+				thumbnail_url: format!("{REMOTE_URL}/mod/{}/image/thumbnail", v.id),
+				id: v.id,
+				content_rating: ContentRating::Sfw,
+			})
+			.collect::<Vec<_>>();
+		
+		entries.sort_unstable_by(|a, b| a.id.cmp(&b.id));
+		
 		Ok(vec![
 			HomeResultEntry {
 				name: "Mods".to_string(),
 				continued: None,
-				// entries: ureq::get(&format!("{REMOTE_URL}/mods"))
-				entries: crate::http::get(&format!("{REMOTE_URL}/mods"))
-					.call()?
-					.into_body()
-					.read_json::<Vec<RemoteModEntry>>()?
-					.into_iter()
-					.map(|v| ModEntry {
-						name: v.name,
-						author: v.author,
-						thumbnail_url: format!("{REMOTE_URL}/mod/{}/image/thumbnail", v.id),
-						id: v.id,
-						content_rating: ContentRating::Sfw,
-					})
-					.collect()
+				entries
 			}
 		])
 	}
