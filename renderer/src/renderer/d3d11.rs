@@ -317,6 +317,7 @@ impl super::RendererInner for D3d11Renderer {
 				let mut data_map = D3D11_MAPPED_SUBRESOURCE::default();
 				self.context.Map(&uniform_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, Some(&mut data_map)).unwrap();
 				core::ptr::copy_nonoverlapping(&uniform_data, data_map.pData as _, 1);
+				self.context.Unmap(&uniform_buffer, 0);
 				
 				self.context.VSSetShader(&material.vs, None);
 				self.context.PSSetShader(&material.ps, None);
@@ -450,6 +451,7 @@ impl super::TextureInner for D3d11Texture {
 		let mut data_map = D3D11_MAPPED_SUBRESOURCE::default();
 		unsafe{self.context.Map(&self.texture, 0, D3D11_MAP_WRITE_DISCARD, 0, Some(&mut data_map)).unwrap()};
 		unsafe{core::ptr::copy_nonoverlapping(data.as_ptr(), data_map.pData as _, data.len())};
+		unsafe{self.context.Unmap(&self.texture, 0)};
 	}
 }
 
@@ -470,6 +472,7 @@ impl super::BufferInner for D3d11Buffer {
 		let mut data_map = D3D11_MAPPED_SUBRESOURCE::default();
 		unsafe{self.context.Map(&self.buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, Some(&mut data_map)).unwrap()};
 		unsafe{core::ptr::copy_nonoverlapping(data.as_ptr(), data_map.pData as _, data.len())};
+		unsafe{self.context.Unmap(&self.buffer, 0)};
 	}
 	
 	fn size(&self) -> usize {

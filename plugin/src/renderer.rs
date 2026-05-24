@@ -201,6 +201,7 @@ impl Texture {
 		for y in 0..height {
 			core::ptr::copy_nonoverlapping(self.data[y * self.w as usize..].as_ptr(), pixels_ptr.add(y * (data.RowPitch / 4) as usize), self.w as usize);
 		}
+		d3d11_ctx.Unmap(&self.texture, 0);
 	}
 }
 
@@ -407,11 +408,13 @@ impl Renderer {
 					let mut data = D3D11_MAPPED_SUBRESOURCE::default();
 					self.d3d11_ctx.Map(&self.vertex_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, Some(&mut data))?;
 					core::ptr::copy_nonoverlapping(vertices.as_ptr(), data.pData as _, vertices.len());
+					self.d3d11_ctx.Unmap(&self.vertex_buffer, 0);
 					self.d3d11_ctx.IASetVertexBuffers(0, 1, Some(&Some(self.vertex_buffer.clone())), Some(&(8 * 4)), Some(&0));
 					
 					let mut data = D3D11_MAPPED_SUBRESOURCE::default();
 					self.d3d11_ctx.Map(&self.index_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, Some(&mut data))?;
 					core::ptr::copy_nonoverlapping(mesh.indices.as_ptr(), data.pData as _, mesh.indices.len());
+					self.d3d11_ctx.Unmap(&self.index_buffer, 0);
 					self.d3d11_ctx.IASetIndexBuffer(&self.index_buffer, DXGI_FORMAT_R32_UINT, 0);
 					
 					self.d3d11_ctx.DrawIndexed(mesh.indices.len() as u32, 0, 0);
