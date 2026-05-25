@@ -164,6 +164,7 @@ pub struct State {
 	ui_backend_runtime: UiBackendRuntime,
 	ui_backend_last_failure: String,
 	ui_backend_last_signature: String,
+	ui_backend_auto_start_imgui_after_failure: bool,
 	frame_index: u64,
 }
 
@@ -537,6 +538,7 @@ pub extern "C" fn initialize(init: Initializers) -> *mut State {
 			ui_backend_runtime: UiBackendRuntime::EguiActive,
 			ui_backend_last_failure: String::new(),
 			ui_backend_last_signature: String::new(),
+			ui_backend_auto_start_imgui_after_failure: false,
 			frame_index: 0,
 		}));
 
@@ -600,8 +602,28 @@ pub extern "C" fn ui_backend_mode_set(state: *mut State, mode: u8) {
 	};
 	state.ui_backend_runtime = match state.ui_backend_mode {
 		UiBackendMode::ForceImgui => UiBackendRuntime::ImguiActive,
+		UiBackendMode::Auto if state.ui_backend_auto_start_imgui_after_failure => {
+			UiBackendRuntime::ImguiActive
+		}
 		_ => UiBackendRuntime::EguiActive,
 	};
+}
+
+#[no_mangle]
+pub extern "C" fn ui_backend_auto_start_imgui_after_failure_set(state: *mut State, enabled: u8) {
+	let state = unsafe { &mut *state };
+	state.ui_backend_auto_start_imgui_after_failure = enabled != 0;
+	if matches!(state.ui_backend_mode, UiBackendMode::Auto)
+		&& state.ui_backend_auto_start_imgui_after_failure
+	{
+		state.ui_backend_runtime = UiBackendRuntime::ImguiActive;
+	}
+}
+
+#[no_mangle]
+pub extern "C" fn ui_backend_retry_egui_once(state: *mut State) {
+	let state = unsafe { &mut *state };
+	state.ui_backend_runtime = UiBackendRuntime::EguiActive;
 }
 
 #[no_mangle]
