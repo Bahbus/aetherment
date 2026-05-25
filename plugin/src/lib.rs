@@ -160,10 +160,72 @@ pub struct State {
 	ui_backend_mode: UiBackendMode,
 	ui_backend_runtime: UiBackendRuntime,
 	ui_backend_last_failure: String,
+	ui_backend_last_signature: String,
 	frame_index: u64,
 }
 
+#[derive(Clone, Copy)]
+enum EguiFailureCategory {
+	Device,
+	Context,
+	Shader,
+	Texture,
+	Input,
+}
+
+impl EguiFailureCategory {
+	fn as_str(self) -> &'static str {
+		match self {
+			Self::Device => "device",
+			Self::Context => "context",
+			Self::Shader => "shader",
+			Self::Texture => "texture",
+			Self::Input => "input",
+		}
+	}
+}
+
+fn fnv1a64(data: &str) -> u64 {
+	let mut hash = 0xcbf29ce484222325u64;
+	for byte in data.as_bytes() {
+		hash ^= *byte as u64;
+		hash = hash.wrapping_mul(0x100000001b3);
+	}
+	hash
+}
+
 impl State {
+	fn categorize_egui_failure(reason: &str) -> EguiFailureCategory {
+		let s = reason.to_ascii_lowercase();
+		if s.contains("shader")
+			|| s.contains("wgsl")
+			|| s.contains("hlsl")
+			|| s.contains("d3dcompile")
+			|| s.contains("naga")
+		{
+			EguiFailureCategory::Shader
+		} else if s.contains("texture") || s.contains("sampler") {
+			EguiFailureCategory::Texture
+		} else if s.contains("input") || s.contains("clipboard") || s.contains("cursor") {
+			EguiFailureCategory::Input
+		} else if s.contains("context") || s.contains("devicecontext") {
+			EguiFailureCategory::Context
+		} else {
+			EguiFailureCategory::Device
+		}
+	}
+
+	fn short_failure_message(reason: &str) -> String {
+		reason
+			.lines()
+			.next()
+			.unwrap_or("unknown error")
+			.trim()
+			.chars()
+			.take(96)
+			.collect::<String>()
+	}
+
 	fn draw_egui_frame(&mut self, d3d11_device: usize, io: Io) -> Result<usize, renderer::Error> {
 		self.renderer.draw(d3d11_device, io, |ctx| {
 			egui::CentralPanel::default()
@@ -202,11 +264,34 @@ impl State {
 				}
 				Err(err) => {
 					let reason = format!("{err:#?}");
-					self.ui_backend_last_failure = reason.clone();
+					let category = Self::categorize_egui_failure(&reason);
+					let message = Self::short_failure_message(&reason);
+					let mode = match self.ui_backend_mode {
+						UiBackendMode::Auto => "auto",
+						UiBackendMode::ForceEgui => "force_egui",
+						UiBackendMode::ForceImgui => "force_imgui",
+					};
+					let auto_fallback = matches!(self.ui_backend_mode, UiBackendMode::Auto);
+					let ts = std::time::SystemTime::now()
+						.duration_since(std::time::UNIX_EPOCH)
+						.map(|v| v.as_secs())
+						.unwrap_or(0);
+					let signature = format!(
+						"egf:{}:{:016x}:{}",
+						category.as_str(),
+						fnv1a64(&format!("{}|{}|{}", category.as_str(), message, mode)),
+						mode
+					);
+					self.ui_backend_last_signature = signature.clone();
+					self.ui_backend_last_failure = format!(
+						"sig={signature}; cat={}; msg={}; frame={}; ts={}; mode={}; auto_fallback={}",
+						category.as_str(), message, self.frame_index, ts, mode, auto_fallback
+					);
 					self.ui_backend_runtime = UiBackendRuntime::EguiFailed {
 						reason,
 						at_frame: self.frame_index,
 					};
+					log::warn!(target: "aetherment", "Egui failure diagnostics: {}", self.ui_backend_last_failure);
 					log::warn!(target: "aetherment", "Failed drawing egui, switching to imgui runtime path");
 					target_egui = false;
 				}
@@ -281,7 +366,7 @@ pub extern "C" fn initialize(init: Initializers) -> *mut State {
 		});
 
 		let renderer_egui = renderer::Renderer::new(init.d3d11_device).unwrap();
-		let renderer_3d: Box<dyn ::renderer::renderer::RendererInner> =
+		let renderer_3d: Box<dyn::renderer::renderer::RendererInner> =
 			Box::new(::renderer::renderer::D3d11Renderer::new(
 				init.d3d11_device,
 				Box::new(|texture| {
@@ -411,6 +496,7 @@ pub extern "C" fn initialize(init: Initializers) -> *mut State {
 			ui_backend_mode: UiBackendMode::Auto,
 			ui_backend_runtime: UiBackendRuntime::EguiActive,
 			ui_backend_last_failure: String::new(),
+			ui_backend_last_signature: String::new(),
 			frame_index: 0,
 		}));
 
@@ -481,6 +567,18 @@ pub extern "C" fn ui_backend_last_failure_len(state: *mut State) -> usize {
 pub extern "C" fn ui_backend_last_failure_ptr(state: *mut State) -> *const u8 {
 	let state = unsafe { &mut *state };
 	state.ui_backend_last_failure.as_ptr()
+}
+
+#[no_mangle]
+pub extern "C" fn ui_backend_last_signature_len(state: *mut State) -> usize {
+	let state = unsafe { &mut *state };
+	state.ui_backend_last_signature.len()
+}
+
+#[no_mangle]
+pub extern "C" fn ui_backend_last_signature_ptr(state: *mut State) -> *const u8 {
+	let state = unsafe { &mut *state };
+	state.ui_backend_last_signature.as_ptr()
 }
 
 #[no_mangle]
