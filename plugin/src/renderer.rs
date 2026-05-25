@@ -375,12 +375,23 @@ impl Renderer {
 		self.d3d11_ctx.IASetInputLayout(Some(&self.layout));
 		
 		for prim in primitives {
-			self.d3d11_ctx.RSSetScissorRects(Some(&[windows::Win32::Foundation::RECT {
-				left: (prim.clip_rect.left() * io.ui_scale) as i32,
-				top: (prim.clip_rect.top() * io.ui_scale) as i32,
-				right: (prim.clip_rect.right() * io.ui_scale) as i32,
-				bottom: (prim.clip_rect.bottom() * io.ui_scale) as i32,
-			}]));
+			let mut clip_min_x = (prim.clip_rect.left() * io.ui_scale).floor() as i32;
+			let mut clip_min_y = (prim.clip_rect.top() * io.ui_scale).floor() as i32;
+			let mut clip_max_x = (prim.clip_rect.right() * io.ui_scale).ceil() as i32;
+			let mut clip_max_y = (prim.clip_rect.bottom() * io.ui_scale).ceil() as i32;
+
+			clip_min_x = clip_min_x.clamp(0, w as i32);
+			clip_min_y = clip_min_y.clamp(0, h as i32);
+			clip_max_x = clip_max_x.clamp(clip_min_x, w as i32);
+			clip_max_y = clip_max_y.clamp(clip_min_y, h as i32);
+
+			let scissor = if clip_min_x == clip_max_x || clip_min_y == clip_max_y {
+				windows::Win32::Foundation::RECT { left: 0, top: 0, right: w as i32, bottom: h as i32 }
+			} else {
+				windows::Win32::Foundation::RECT { left: clip_min_x, top: clip_min_y, right: clip_max_x, bottom: clip_max_y }
+			};
+
+			self.d3d11_ctx.RSSetScissorRects(Some(&[scissor]));
 			
 			match prim.primitive {
 				egui::epaint::Primitive::Callback(_) => {}
