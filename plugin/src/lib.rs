@@ -153,7 +153,11 @@ impl log::Log for DalamudLogger {
 
 // ------------------------------
 
-pub struct State {
+pub const AUTO_RETRY_COOLDOWN_FRAMES: u64 = 180;
+const AUTO_REPEAT_WINDOW_FRAMES: u64 = 600;
+const AUTO_REPEAT_FAILURE_THRESHOLD: u32 = 3;
+
+struct State {
 	renderer: renderer::Renderer,
 	renderer_3d: ::renderer::Renderer,
 	core: aetherment::Core,
@@ -166,9 +170,17 @@ pub struct State {
 	ui_backend_last_signature: String,
 	ui_backend_auto_start_imgui_after_failure: bool,
 	frame_index: u64,
+	auto_retry_egui_after_frame: u64,
+	auto_failure_window_start_frame: u64,
+	auto_failure_window_count: u32,
+	auto_mode_locked_to_imgui: bool,
+	auto_mode_lock_notification_emitted: bool,
+	egui_failure_total_count: u64,
+	egui_failure_bucket_counts: [u64; 5],
 }
 
 #[derive(Clone, Copy)]
+#[repr(u8)]
 enum EguiFailureCategory {
 	Device,
 	Context,
@@ -178,6 +190,10 @@ enum EguiFailureCategory {
 }
 
 impl EguiFailureCategory {
+	fn index(self) -> usize {
+		self as usize
+	}
+
 	fn as_str(self) -> &'static str {
 		match self {
 			Self::Device => "device",
@@ -253,9 +269,16 @@ impl State {
 		Ok(0)
 	}
 
+	fn record_egui_failure(&mut self, category: EguiFailureCategory) {
+		self.egui_failure_total_count = self.egui_failure_total_count.saturating_add(1);
+		self.egui_failure_bucket_counts[category.index()] =
+			self.egui_failure_bucket_counts[category.index()].saturating_add(1);
+	}
+
 	fn mark_egui_failure(&mut self, reason: String) {
 		let category = Self::categorize_egui_failure(&reason);
 		let message = Self::short_failure_message(&reason);
+		self.record_egui_failure(category);
 		let mode = match self.ui_backend_mode {
 			UiBackendMode::Auto => "auto",
 			UiBackendMode::ForceEgui => "force_egui",
@@ -282,6 +305,33 @@ impl State {
 			mode,
 			auto_fallback
 		);
+		if matches!(self.ui_backend_mode, UiBackendMode::Auto) {
+			self.auto_retry_egui_after_frame =
+				self.frame_index.saturating_add(AUTO_RETRY_COOLDOWN_FRAMES);
+			if self.auto_failure_window_count == 0
+				|| self
+					.frame_index
+					.saturating_sub(self.auto_failure_window_start_frame)
+					> AUTO_REPEAT_WINDOW_FRAMES
+			{
+				self.auto_failure_window_start_frame = self.frame_index;
+				self.auto_failure_window_count = 1;
+			} else {
+				self.auto_failure_window_count = self.auto_failure_window_count.saturating_add(1);
+			}
+
+			if self.auto_failure_window_count >= AUTO_REPEAT_FAILURE_THRESHOLD {
+				self.auto_mode_locked_to_imgui = true;
+				self.ui_backend_runtime = UiBackendRuntime::ImguiActive;
+				if !self.auto_mode_lock_notification_emitted {
+					set_notification(0.0, 1, "Aetherment: persistent egui renderer failure detected; locked to ImGui for this session.");
+					self.auto_mode_lock_notification_emitted = true;
+				}
+				log::warn!(target: "aetherment", "Auto mode locked to ImGui after repeated egui failures ({} in {} frames)", self.auto_failure_window_count, AUTO_REPEAT_WINDOW_FRAMES);
+				return;
+			}
+		}
+
 		self.ui_backend_runtime = UiBackendRuntime::EguiFailed {
 			reason,
 			at_frame: self.frame_index,
@@ -301,10 +351,16 @@ impl State {
 		let mut target_egui = match self.ui_backend_mode {
 			UiBackendMode::ForceEgui => true,
 			UiBackendMode::ForceImgui => false,
-			UiBackendMode::Auto => !matches!(
-				self.ui_backend_runtime,
-				UiBackendRuntime::ImguiActive | UiBackendRuntime::EguiFailed { .. }
-			),
+			UiBackendMode::Auto => {
+				if self.auto_mode_locked_to_imgui {
+					false
+				} else {
+					!matches!(
+						self.ui_backend_runtime,
+						UiBackendRuntime::ImguiActive | UiBackendRuntime::EguiFailed { .. }
+					) || self.frame_index >= self.auto_retry_egui_after_frame
+				}
+			}
 		};
 
 		if target_egui {
@@ -540,6 +596,13 @@ pub extern "C" fn initialize(init: Initializers) -> *mut State {
 			ui_backend_last_signature: String::new(),
 			ui_backend_auto_start_imgui_after_failure: false,
 			frame_index: 0,
+			auto_retry_egui_after_frame: 0,
+			auto_failure_window_start_frame: 0,
+			auto_failure_window_count: 0,
+			auto_mode_locked_to_imgui: false,
+			auto_mode_lock_notification_emitted: false,
+			egui_failure_total_count: 0,
+			egui_failure_bucket_counts: [0; 5],
 		}));
 
 		state
@@ -600,6 +663,9 @@ pub extern "C" fn ui_backend_mode_set(state: *mut State, mode: u8) {
 		2 => UiBackendMode::ForceImgui,
 		_ => UiBackendMode::Auto,
 	};
+	if !matches!(state.ui_backend_mode, UiBackendMode::Auto) {
+		state.auto_mode_locked_to_imgui = false;
+	}
 	state.ui_backend_runtime = match state.ui_backend_mode {
 		UiBackendMode::ForceImgui => UiBackendRuntime::ImguiActive,
 		UiBackendMode::Auto if state.ui_backend_auto_start_imgui_after_failure => {
@@ -623,7 +689,9 @@ pub extern "C" fn ui_backend_auto_start_imgui_after_failure_set(state: *mut Stat
 #[no_mangle]
 pub extern "C" fn ui_backend_retry_egui_once(state: *mut State) {
 	let state = unsafe { &mut *state };
-	state.ui_backend_runtime = UiBackendRuntime::EguiActive;
+	if !(matches!(state.ui_backend_mode, UiBackendMode::Auto) && state.auto_mode_locked_to_imgui) {
+		state.ui_backend_runtime = UiBackendRuntime::EguiActive;
+	}
 }
 
 #[no_mangle]
@@ -648,6 +716,28 @@ pub extern "C" fn ui_backend_last_signature_len(state: *mut State) -> usize {
 pub extern "C" fn ui_backend_last_signature_ptr(state: *mut State) -> *const u8 {
 	let state = unsafe { &mut *state };
 	state.ui_backend_last_signature.as_ptr()
+}
+
+#[no_mangle]
+pub extern "C" fn ui_backend_failure_total_count(state: *mut State) -> u64 {
+	let state = unsafe { &mut *state };
+	state.egui_failure_total_count
+}
+
+#[no_mangle]
+pub extern "C" fn ui_backend_failure_bucket_count(state: *mut State, bucket: u8) -> u64 {
+	let state = unsafe { &mut *state };
+	state
+		.egui_failure_bucket_counts
+		.get(bucket as usize)
+		.copied()
+		.unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn ui_backend_auto_locked_to_imgui(state: *mut State) -> u8 {
+	let state = unsafe { &mut *state };
+	state.auto_mode_locked_to_imgui as u8
 }
 
 #[no_mangle]
