@@ -245,6 +245,9 @@ impl State {
 	}
 
 	fn draw_imgui_frame(&mut self) -> Result<usize, renderer::Error> {
+		// Fallback UI ownership contract:
+		// - This Rust path is state-only and does not render fallback widgets.
+		// - The C# plugin window owns all ImGui fallback controls/panels.
 		self.ui_backend_runtime = UiBackendRuntime::ImguiActive;
 		Ok(0)
 	}
