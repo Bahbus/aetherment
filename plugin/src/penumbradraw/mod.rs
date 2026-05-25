@@ -101,14 +101,23 @@ impl PenumbraDraw {
 			};
 			if !remote_settings.origin.is_empty() {
 				imgui::dummy([0.0, 10.0 * ui_scale]);
+				let mut should_save_remote_settings = false;
 				if imgui::checkbox(&mut remote_settings.auto_update, "Auto Update") {
-					let save_result = std::panic::catch_unwind(|| remote_settings.save(mod_id));
-					if save_result.is_err() {
+					should_save_remote_settings = true;
+				}
+
+				drop(remote_settings);
+				if should_save_remote_settings {
+					let Some(mut remote_settings) =
+						self.mod_manager.settings_remote.get_mut(mod_id)
+					else {
 						self.last_remote_warning = Some(
-							"Failed to save remote settings; retaining current in-memory value."
+							"Remote cache entry became unavailable before saving remote settings."
 								.to_string(),
 						);
-					}
+						return true;
+					};
+					remote_settings.save(mod_id);
 				}
 				if imgui::small_button("Refresh remote metadata") {
 					match std::panic::catch_unwind(|| {
