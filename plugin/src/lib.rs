@@ -26,7 +26,10 @@ pub enum UiBackendRuntime {
 
 static mut ADDSTYLE: fn(FfiStr) = |_| {};
 fn dalamud_add_style(s: &str) {
-	unsafe { ADDSTYLE(FfiStr::new(s)) }
+	let res = std::panic::catch_unwind(|| unsafe { ADDSTYLE(FfiStr::new(s)) });
+	if res.is_err() {
+		log::warn!(target: "aetherment", "Optional integration call failed: dalamud_add_style");
+	}
 }
 
 static mut NOTIFICATION: fn(f32, u8, FfiStr) = |_, _, _| {};
@@ -366,7 +369,7 @@ pub extern "C" fn initialize(init: Initializers) -> *mut State {
 		});
 
 		let renderer_egui = renderer::Renderer::new(init.d3d11_device).unwrap();
-		let renderer_3d: Box<dyn::renderer::renderer::RendererInner> =
+		let renderer_3d: Box<dyn ::renderer::renderer::RendererInner> =
 			Box::new(::renderer::renderer::D3d11Renderer::new(
 				init.d3d11_device,
 				Box::new(|texture| {
@@ -482,7 +485,12 @@ pub extern "C" fn initialize(init: Initializers) -> *mut State {
 							clr: *c,
 						})
 						.collect::<Vec<_>>();
-					(services_funcs.set_ui_colors)(colors.as_ptr(), colors.len());
+					let res = std::panic::catch_unwind(|| {
+						(services_funcs.set_ui_colors)(colors.as_ptr(), colors.len());
+					});
+					if res.is_err() {
+						log::warn!(target: "aetherment", "Optional integration call failed: set_ui_colors");
+					}
 				}),
 			},
 		);

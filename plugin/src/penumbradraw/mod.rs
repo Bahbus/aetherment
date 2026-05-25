@@ -8,6 +8,7 @@ pub struct PenumbraDraw {
 	new_preset_name: String,
 	selected_category_tab: usize,
 	preset_page_index: usize,
+	last_remote_warning: Option<String>,
 }
 
 const PRESET_PAGE_SIZE: usize = 10;
@@ -24,6 +25,7 @@ impl PenumbraDraw {
 			new_preset_name: String::new(),
 			selected_category_tab: 0,
 			preset_page_index: 0,
+			last_remote_warning: None,
 		}
 	}
 
@@ -36,9 +38,29 @@ impl PenumbraDraw {
 		let Some(mut mod_settings) = self.mod_manager.settings.get_mut(mod_id) else {
 			return false;
 		};
-		let Some(mut remote_settings) = self.mod_manager.settings_remote.get_mut(mod_id) else {
-			return false;
-		};
+		let mut remote_settings_exists = self.mod_manager.settings_remote.contains_key(mod_id);
+		if !remote_settings_exists {
+			let open_result =
+				std::panic::catch_unwind(|| aetherment::remote::settings::Settings::open(mod_id));
+			match open_result {
+				Ok(settings) => {
+					self.mod_manager
+						.settings_remote
+						.insert(mod_id.into(), settings);
+					remote_settings_exists = true;
+					self.last_remote_warning = Some(
+						"Remote settings cache was missing; loaded local fallback settings."
+							.to_string(),
+					);
+				}
+				Err(_) => {
+					self.last_remote_warning = Some(
+						"Remote settings unavailable; using local-only fallback controls."
+							.to_string(),
+					);
+				}
+			}
+		}
 		let collection_id = aetherment::modman::backend::penumbra_ipc::get_collection(
 			aetherment::modman::backend::CollectionType::Current,
 		)
@@ -47,10 +69,65 @@ impl PenumbraDraw {
 		let mut presets = mod_settings.presets.clone();
 		let settings = mod_settings.get_collection(&meta, &collection_id);
 
-		if !remote_settings.origin.is_empty() {
+		if let Some(msg) = &self.last_remote_warning {
 			imgui::dummy([0.0, 10.0 * ui_scale]);
-			if imgui::checkbox(&mut remote_settings.auto_update, "Auto Update") {
-				remote_settings.save(mod_id);
+			imgui::label(format!("Warning: {msg}"));
+			if imgui::button("Retry remote settings load") {
+				match std::panic::catch_unwind(|| {
+					aetherment::remote::settings::Settings::open(mod_id)
+				}) {
+					Ok(settings) => {
+						self.mod_manager
+							.settings_remote
+							.insert(mod_id.into(), settings);
+						self.last_remote_warning = None;
+					}
+					Err(_) => {
+						self.last_remote_warning = Some(
+							"Retry failed; still using local-only fallback controls.".to_string(),
+						);
+					}
+				}
+			}
+		}
+
+		if remote_settings_exists {
+			let Some(mut remote_settings) = self.mod_manager.settings_remote.get_mut(mod_id) else {
+				self.last_remote_warning = Some(
+					"Remote cache entry became unavailable; showing local-only fallback."
+						.to_string(),
+				);
+				return true;
+			};
+			if !remote_settings.origin.is_empty() {
+				imgui::dummy([0.0, 10.0 * ui_scale]);
+				if imgui::checkbox(&mut remote_settings.auto_update, "Auto Update") {
+					let save_result = std::panic::catch_unwind(|| remote_settings.save(mod_id));
+					if save_result.is_err() {
+						self.last_remote_warning = Some(
+							"Failed to save remote settings; retaining current in-memory value."
+								.to_string(),
+						);
+					}
+				}
+				if imgui::small_button("Refresh remote metadata") {
+					match std::panic::catch_unwind(|| {
+						aetherment::remote::settings::Settings::open(mod_id)
+					}) {
+						Ok(settings) => {
+							self.mod_manager
+								.settings_remote
+								.insert(mod_id.into(), settings);
+							self.last_remote_warning = None;
+						}
+						Err(_) => {
+							self.last_remote_warning = Some(
+								"Remote refresh failed; stale/cached values are still shown."
+									.to_string(),
+							);
+						}
+					}
+				}
 			}
 		}
 
