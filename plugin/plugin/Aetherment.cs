@@ -17,6 +17,10 @@ using Dalamud.Bindings.ImGui;
 namespace Aetherment;
 
 public class Aetherment: IDalamudPlugin {
+	private class Config {
+		public byte UiBackendMode { get; set; } = 0;
+	}
+
 	public string Name => "Aetherment";
 	
 	[PluginService] public static IDalamudPluginInterface Interface  {get; private set;} = null!;
@@ -45,6 +49,7 @@ public class Aetherment: IDalamudPlugin {
 	private DalamudStyle dalamud;
 	private UiColor uicolor;
 	private TexFinder texfinder;
+	private Config config;
 	
 	private static nint device;
 	
@@ -121,6 +126,7 @@ public class Aetherment: IDalamudPlugin {
 		dalamud = new();
 		uicolor = new();
 		texfinder = new();
+		config = Interface.GetPluginConfig() as Config ?? new Config();
 		
 		device = Interface.UiBuilder.DeviceHandle;
 		
@@ -160,6 +166,7 @@ public class Aetherment: IDalamudPlugin {
 		try {
 			state = Native.initialize(init);
 			open = Native.config_plugin_open_on_launch(state) != 0;
+			Native.ui_backend_mode_set(state, config.UiBackendMode);
 		} catch(Exception e) {
 			Kill($"{e.GetBaseException().Message}\n\n{e}", 2);
 		}
@@ -227,6 +234,22 @@ public class Aetherment: IDalamudPlugin {
 			ImGui.SetNextWindowPos(new Vector2(50), ImGuiCond.FirstUseEver);
 			ImGui.SetNextWindowSize(new Vector2(200), ImGuiCond.FirstUseEver);
 			ImGui.Begin("Aetherment", ref open);
+
+			byte backendMode = Native.ui_backend_mode_get(state);
+			string[] backendOptions = ["Auto", "Force Egui", "Force Imgui"];
+			int backendModeInt = Math.Clamp((int)backendMode, 0, backendOptions.Length - 1);
+			if(ImGui.Combo("UI Backend", ref backendModeInt, backendOptions, backendOptions.Length)) {
+				backendMode = (byte)backendModeInt;
+				Native.ui_backend_mode_set(state, backendMode);
+				config.UiBackendMode = backendMode;
+				Interface.SavePluginConfig(config);
+			}
+
+			var failurePtr = Native.ui_backend_last_failure_ptr(state);
+			int failureLen = (int)Native.ui_backend_last_failure_len(state);
+			if(failurePtr != 0 && failureLen > 0)
+				ImGui.TextWrapped($"Last Egui Failure: {Marshal.PtrToStringUTF8(failurePtr, failureLen)}");
+
 			DrawNative(Native.draw);
 			ImGui.End();
 		}
