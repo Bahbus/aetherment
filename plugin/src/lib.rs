@@ -513,5 +513,15 @@ pub extern "C" fn backend_penumbraipc_modchanged(
 #[no_mangle]
 pub extern "C" fn backend_penumbraipc_drawsettings(state: *mut State, mod_id: FfiString) -> u8 {
 	let state = unsafe { &mut *state };
-	state.penumbradraw.settings(state.ui_scale, mod_id.as_str()) as u8
+	state.penumbradraw.draw(state.ui_scale, mod_id.as_str()) as u8
+}
+
+#[no_mangle]
+pub extern "C" fn ui_backend_runtime_get(state: *mut State) -> u8 {
+	let state = unsafe { &mut *state };
+	match state.ui_backend_runtime {
+		UiBackendRuntime::EguiActive => 0,
+		UiBackendRuntime::ImguiActive => 1,
+		UiBackendRuntime::EguiFailed { .. } => 2,
+	}
 }
