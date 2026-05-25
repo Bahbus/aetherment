@@ -17,9 +17,15 @@ impl Default for Settings {
 }
 
 impl Settings {
-	pub fn exists(mod_id: &str) -> bool {
+	fn path_for(mod_id: &str) -> Result<std::path::PathBuf, std::io::Error> {
 		let id_hash = crate::hash_str(blake3::hash(mod_id.as_bytes()));
-		dirs::config_dir().ok_or("No Config Dir (???)").unwrap().join("Aetherment").join("remote").join(id_hash).exists()
+		let config_dir = dirs::config_dir()
+			.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No config dir"))?;
+		Ok(config_dir.join("Aetherment").join("remote").join(id_hash))
+	}
+
+	pub fn exists(mod_id: &str) -> bool {
+		Self::path_for(mod_id).map(|path| path.exists()).unwrap_or(false)
 	}
 	
 	pub fn open_from(path: &Path) -> Self {
@@ -27,10 +33,11 @@ impl Settings {
 	}
 	
 	pub fn open(mod_id: &str) -> Self {
-		let id_hash = crate::hash_str(blake3::hash(mod_id.as_bytes()));
-		
-		let dir = dirs::config_dir().ok_or("No Config Dir (???)").unwrap().join("Aetherment").join("remote");
-		Self::open_from(&dir.join(id_hash))
+		Self::try_open(mod_id).unwrap_or_default()
+	}
+
+	pub fn try_open(mod_id: &str) -> Result<Self, std::io::Error> {
+		Ok(Self::open_from(&Self::path_for(mod_id)?))
 	}
 	
 	pub fn save_to(&self, path: &Path) {
@@ -39,11 +46,15 @@ impl Settings {
 	}
 	
 	pub fn save(&self, mod_id: &str) {
-		let id_hash = crate::hash_str(blake3::hash(mod_id .as_bytes()));
-		
-		let dir = dirs::config_dir().ok_or("No Config Dir (???)").unwrap().join("Aetherment").join("remote");
-		_ = std::fs::create_dir_all(&dir);
-		
-		self.save_to(&dir.join(id_hash));
+		_ = self.try_save(mod_id);
+	}
+
+	pub fn try_save(&self, mod_id: &str) -> Result<(), std::io::Error> {
+		let path = Self::path_for(mod_id)?;
+		if let Some(parent) = path.parent() {
+			std::fs::create_dir_all(parent)?;
+		}
+		self.save_to(&path);
+		Ok(())
 	}
 }
