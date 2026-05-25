@@ -13,11 +13,16 @@ using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Configuration;
 
 namespace Aetherment;
 
 public class Aetherment: IDalamudPlugin {
-	private class Config {
+	// Dalamud ApiLevel 15 expects plugin configs used with GetPluginConfig/SavePluginConfig
+	// to implement IPluginConfiguration and expose a Version property for schema versioning.
+	private class Config : IPluginConfiguration {
+		// Keep this at 1 for the current schema (UiBackendMode only).
+		public int Version { get; set; } = 1;
 		public byte UiBackendMode { get; set; } = 0;
 	}
 
