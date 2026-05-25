@@ -40,9 +40,7 @@ impl PenumbraDraw {
 		};
 		let mut remote_settings_exists = self.mod_manager.settings_remote.contains_key(mod_id);
 		if !remote_settings_exists {
-			let open_result =
-				std::panic::catch_unwind(|| aetherment::remote::settings::Settings::open(mod_id));
-			match open_result {
+			match aetherment::remote::settings::Settings::try_open(mod_id) {
 				Ok(settings) => {
 					self.mod_manager
 						.settings_remote
@@ -53,7 +51,8 @@ impl PenumbraDraw {
 							.to_string(),
 					);
 				}
-				Err(_) => {
+				Err(err) => {
+					log::warn!(target: "aetherment", "Remote settings load failed for {mod_id}: {err}");
 					self.last_remote_warning = Some(
 						"Remote settings unavailable; using local-only fallback controls."
 							.to_string(),
@@ -73,16 +72,15 @@ impl PenumbraDraw {
 			imgui::dummy([0.0, 10.0 * ui_scale]);
 			imgui::label(format!("Warning: {msg}"));
 			if imgui::button("Retry remote settings load") {
-				match std::panic::catch_unwind(|| {
-					aetherment::remote::settings::Settings::open(mod_id)
-				}) {
+				match aetherment::remote::settings::Settings::try_open(mod_id) {
 					Ok(settings) => {
 						self.mod_manager
 							.settings_remote
 							.insert(mod_id.into(), settings);
 						self.last_remote_warning = None;
 					}
-					Err(_) => {
+					Err(err) => {
+						log::warn!(target: "aetherment", "Remote settings reload failed for {mod_id}: {err}");
 						self.last_remote_warning = Some(
 							"Retry failed; still using local-only fallback controls.".to_string(),
 						);
@@ -117,19 +115,20 @@ impl PenumbraDraw {
 						);
 						return true;
 					};
-					remote_settings.save(mod_id);
+					if let Err(err) = remote_settings.try_save(mod_id) {
+						log::warn!(target: "aetherment", "Remote settings save failed for {mod_id}: {err}");
+					}
 				}
 				if imgui::small_button("Refresh remote metadata") {
-					match std::panic::catch_unwind(|| {
-						aetherment::remote::settings::Settings::open(mod_id)
-					}) {
+					match aetherment::remote::settings::Settings::try_open(mod_id) {
 						Ok(settings) => {
 							self.mod_manager
 								.settings_remote
 								.insert(mod_id.into(), settings);
 							self.last_remote_warning = None;
 						}
-						Err(_) => {
+						Err(err) => {
+							log::warn!(target: "aetherment", "Remote settings refresh failed for {mod_id}: {err}");
 							self.last_remote_warning = Some(
 								"Remote refresh failed; stale/cached values are still shown."
 									.to_string(),
