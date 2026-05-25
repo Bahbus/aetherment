@@ -34,6 +34,7 @@ public class Aetherment: IDalamudPlugin {
 	[PluginService] public static INotificationManager    NotifMan   {get; private set;} = null!;
 	
 	private const string maincommand = "/aetherment";
+	private const string diagcommand = "/aethermentdiag";
 	private const string texfindercommand = "/texfinder";
 	
 	private bool open = false;
@@ -183,6 +184,9 @@ public class Aetherment: IDalamudPlugin {
 		Commands.AddHandler(texfindercommand, new CommandInfo(OnCommand) {
 			HelpMessage = "Open the Texture Finder tool"
 		});
+		Commands.AddHandler(diagcommand, new CommandInfo(OnCommand) {
+			HelpMessage = "Copy latest egui diagnostics to clipboard"
+		});
 		
 		// Reload if the rust part changes
 		// if(Interface.IsDev) {
@@ -217,6 +221,7 @@ public class Aetherment: IDalamudPlugin {
 		
 		Commands.RemoveHandler(maincommand);
 		Commands.RemoveHandler(texfindercommand);
+		Commands.RemoveHandler(diagcommand);
 		
 		// if(watcher != null)
 		// 	watcher.Dispose();
@@ -247,8 +252,21 @@ public class Aetherment: IDalamudPlugin {
 
 			var failurePtr = Native.ui_backend_last_failure_ptr(state);
 			int failureLen = (int)Native.ui_backend_last_failure_len(state);
-			if(failurePtr != 0 && failureLen > 0)
-				ImGui.TextWrapped($"Last Egui Failure: {Marshal.PtrToStringUTF8(failurePtr, failureLen)}");
+			var failure = failurePtr != 0 && failureLen > 0 ? Marshal.PtrToStringUTF8(failurePtr, failureLen) : "";
+			if(!string.IsNullOrEmpty(failure))
+				ImGui.TextWrapped($"Last Egui Failure: {failure}");
+			var sigPtr = Native.ui_backend_last_signature_ptr(state);
+			int sigLen = (int)Native.ui_backend_last_signature_len(state);
+			var signature = sigPtr != 0 && sigLen > 0 ? Marshal.PtrToStringUTF8(sigPtr, sigLen) : "";
+			if(!string.IsNullOrEmpty(signature))
+				ImGui.TextWrapped($"Last Egui Signature: {signature}");
+			if(ImGui.Button("Copy UI Diagnostics")) {
+				var payload = string.IsNullOrEmpty(signature) ? failure : $"{signature}\n{failure}";
+				if(!string.IsNullOrEmpty(payload)) {
+					ImGui.SetClipboardText(payload);
+					Logger.Info($"Copied Aetherment UI diagnostics: {signature}");
+				}
+			}
 
 			bool forceImgui = backendMode == 2;
 			bool imguiActive = Native.ui_backend_runtime_get(state) == 1;
@@ -345,6 +363,20 @@ public class Aetherment: IDalamudPlugin {
 	private void OnCommand(string cmd, string args) {
 		if(cmd == texfindercommand) {
 			texfinder.shoulddraw = !texfinder.shoulddraw;
+			return;
+		}
+		if(cmd == diagcommand) {
+			var failurePtr = Native.ui_backend_last_failure_ptr(state);
+			int failureLen = (int)Native.ui_backend_last_failure_len(state);
+			var failure = failurePtr != 0 && failureLen > 0 ? Marshal.PtrToStringUTF8(failurePtr, failureLen) : "";
+			var sigPtr = Native.ui_backend_last_signature_ptr(state);
+			int sigLen = (int)Native.ui_backend_last_signature_len(state);
+			var signature = sigPtr != 0 && sigLen > 0 ? Marshal.PtrToStringUTF8(sigPtr, sigLen) : "";
+			var payload = string.IsNullOrEmpty(signature) ? failure : $"{signature}\n{failure}";
+			if(!string.IsNullOrEmpty(payload)) {
+				ImGui.SetClipboardText(payload);
+				Logger.Info($"Copied Aetherment UI diagnostics: {signature}");
+			}
 			return;
 		}
 		
