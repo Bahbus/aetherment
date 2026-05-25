@@ -252,6 +252,50 @@ impl State {
 		Ok(0)
 	}
 
+	fn mark_egui_failure(&mut self, reason: String) {
+		let category = Self::categorize_egui_failure(&reason);
+		let message = Self::short_failure_message(&reason);
+		let mode = match self.ui_backend_mode {
+			UiBackendMode::Auto => "auto",
+			UiBackendMode::ForceEgui => "force_egui",
+			UiBackendMode::ForceImgui => "force_imgui",
+		};
+		let auto_fallback = matches!(self.ui_backend_mode, UiBackendMode::Auto);
+		let ts = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.map(|v| v.as_secs())
+			.unwrap_or(0);
+		let signature = format!(
+			"egf:{}:{:016x}:{}",
+			category.as_str(),
+			fnv1a64(&format!("{}|{}|{}", category.as_str(), message, mode)),
+			mode
+		);
+		self.ui_backend_last_signature = signature.clone();
+		self.ui_backend_last_failure = format!(
+			"sig={signature}; cat={}; msg={}; frame={}; ts={}; mode={}; auto_fallback={}",
+			category.as_str(),
+			message,
+			self.frame_index,
+			ts,
+			mode,
+			auto_fallback
+		);
+		self.ui_backend_runtime = UiBackendRuntime::EguiFailed {
+			reason,
+			at_frame: self.frame_index,
+		};
+		log::warn!(
+			target: "aetherment",
+			"Egui failure diagnostics: {}",
+			self.ui_backend_last_failure
+		);
+		log::warn!(
+			target: "aetherment",
+			"Failed drawing egui, switching to imgui runtime path"
+		);
+	}
+
 	fn draw_frame_dispatch(&mut self, d3d11_device: usize, io: Io) -> usize {
 		let mut target_egui = match self.ui_backend_mode {
 			UiBackendMode::ForceEgui => true,
@@ -263,48 +307,33 @@ impl State {
 		};
 
 		if target_egui {
-			match self.draw_egui_frame(d3d11_device, io.clone()) {
-				Ok(v) => {
+			let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+				self.draw_egui_frame(d3d11_device, io.clone())
+			}));
+			match res {
+				Ok(Ok(v)) => {
 					self.ui_backend_runtime = UiBackendRuntime::EguiActive;
 					return v;
 				}
-				Err(err) => {
-					let reason = format!("{err:#?}");
-					let category = Self::categorize_egui_failure(&reason);
-					let message = Self::short_failure_message(&reason);
-					let mode = match self.ui_backend_mode {
-						UiBackendMode::Auto => "auto",
-						UiBackendMode::ForceEgui => "force_egui",
-						UiBackendMode::ForceImgui => "force_imgui",
+				Ok(Err(err)) => {
+					self.mark_egui_failure(format!("{err:#?}"));
+					target_egui = false;
+				}
+				Err(payload) => {
+					let panic_msg = if let Some(s) = payload.downcast_ref::<&'static str>() {
+						(*s).to_string()
+					} else if let Some(s) = payload.downcast_ref::<String>() {
+						s.clone()
+					} else {
+						"Box<Any>".to_string()
 					};
-					let auto_fallback = matches!(self.ui_backend_mode, UiBackendMode::Auto);
-					let ts = std::time::SystemTime::now()
-						.duration_since(std::time::UNIX_EPOCH)
-						.map(|v| v.as_secs())
-						.unwrap_or(0);
-					let signature = format!(
-						"egf:{}:{:016x}:{}",
-						category.as_str(),
-						fnv1a64(&format!("{}|{}|{}", category.as_str(), message, mode)),
-						mode
-					);
-					self.ui_backend_last_signature = signature.clone();
-					self.ui_backend_last_failure = format!(
-						"sig={signature}; cat={}; msg={}; frame={}; ts={}; mode={}; auto_fallback={}",
-						category.as_str(), message, self.frame_index, ts, mode, auto_fallback
-					);
-					self.ui_backend_runtime = UiBackendRuntime::EguiFailed {
-						reason,
-						at_frame: self.frame_index,
-					};
-					log::warn!(target: "aetherment", "Egui failure diagnostics: {}", self.ui_backend_last_failure);
-					log::warn!(target: "aetherment", "Failed drawing egui, switching to imgui runtime path");
+					self.mark_egui_failure(format!("panic:{panic_msg}"));
 					target_egui = false;
 				}
 			}
 		}
 
-		if !target_egui {
+		if !target_egui && !matches!(self.ui_backend_mode, UiBackendMode::ForceEgui) {
 			return self.draw_imgui_frame().unwrap_or(0);
 		}
 
@@ -536,12 +565,19 @@ pub extern "C" fn draw(state: *mut State, d3d11_device: usize, io: Io) -> usize 
 	let state = unsafe { &mut *state };
 	state.frame_index += 1;
 
-	let r = state
+	let maybe_r = state
 		.renderer_3d
 		.as_any_mut()
-		.downcast_mut::<::renderer::renderer::D3d11Renderer>()
-		.unwrap();
-	r.update_device(d3d11_device);
+		.downcast_mut::<::renderer::renderer::D3d11Renderer>();
+	if let Some(r) = maybe_r {
+		r.update_device(d3d11_device);
+	} else {
+		state.mark_egui_failure("renderer state mismatch: missing D3d11Renderer".to_string());
+		if !matches!(state.ui_backend_mode, UiBackendMode::ForceEgui) {
+			return state.draw_imgui_frame().unwrap_or(0);
+		}
+		return 0;
+	}
 
 	state.ui_scale = io.ui_scale;
 
