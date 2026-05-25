@@ -9,6 +9,21 @@ mod penumbradraw;
 use std::collections::HashMap;
 use ffi::str::{FfiString, FfiStr};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum UiBackendMode {
+	Auto = 0,
+	ForceEgui = 1,
+	ForceImgui = 2,
+}
+
+#[derive(Clone, Debug)]
+pub enum UiBackendRuntime {
+	EguiActive,
+	ImguiActive,
+	EguiFailed{reason: String, at_frame: u64},
+}
+
 static mut ADDSTYLE: fn(FfiStr) = |_| {};
 fn dalamud_add_style(s: &str) {
 	unsafe{ADDSTYLE(FfiStr::new(s))}
@@ -140,9 +155,13 @@ pub struct State {
 	renderer: renderer::Renderer,
 	renderer_3d: ::renderer::Renderer,
 	core: aetherment::Core,
-	
+
 	penumbradraw: penumbradraw::PenumbraDraw,
 	ui_scale: f32,
+	ui_backend_mode: UiBackendMode,
+	ui_backend_runtime: UiBackendRuntime,
+	ui_backend_last_failure: String,
+	frame_index: u64,
 }
 
 #[no_mangle]
@@ -286,6 +305,10 @@ pub extern "C" fn initialize(init: Initializers) -> *mut State {
 			renderer: renderer_egui,
 			renderer_3d: renderer_3d,
 			ui_scale: 1.0,
+			ui_backend_mode: UiBackendMode::Auto,
+			ui_backend_runtime: UiBackendRuntime::EguiActive,
+			ui_backend_last_failure: String::new(),
+			frame_index: 0,
 		}));
 		
 		state
@@ -311,13 +334,21 @@ pub extern "C" fn command(state: *mut State, _args: FfiString) -> bool {
 #[no_mangle]
 pub extern "C" fn draw(state: *mut State, d3d11_device: usize, io: Io) -> usize {
 	let state = unsafe{&mut *state};
+	state.frame_index += 1;
 	
 	let r = state.renderer_3d.as_any_mut().downcast_mut::<::renderer::renderer::D3d11Renderer>().unwrap();
 	r.update_device(d3d11_device);
 	
 	state.ui_scale = io.ui_scale;
 	
-	match state.renderer.draw(d3d11_device, io, |ctx| {
+	let mut target_egui = match state.ui_backend_mode {
+		UiBackendMode::ForceEgui => true,
+		UiBackendMode::ForceImgui => false,
+		UiBackendMode::Auto => !matches!(state.ui_backend_runtime, UiBackendRuntime::ImguiActive | UiBackendRuntime::EguiFailed{..}),
+	};
+
+	if target_egui {
+		match state.renderer.draw(d3d11_device, io, |ctx| {
 		egui::CentralPanel::default().frame(egui::Frame {
 			inner_margin: egui::Margin::same(0),
 			outer_margin: egui::Margin::same(0),
@@ -328,13 +359,58 @@ pub extern "C" fn draw(state: *mut State, d3d11_device: usize, io: Io) -> usize 
 		}).show(ctx, |ui| {
 			state.core.draw(ui, &state.renderer_3d)
 		});
-	}) {
-		Ok(v) => v,
-		Err(err) => {
-			log::warn!(target: "aetherment", "Failed drawing: {err:#?}");
-			0 as _
+		}) {
+			Ok(v) => {
+				state.ui_backend_runtime = UiBackendRuntime::EguiActive;
+				return v;
+			}
+			Err(err) => {
+				let reason = format!("{err:#?}");
+				state.ui_backend_last_failure = reason.clone();
+				state.ui_backend_runtime = UiBackendRuntime::EguiFailed { reason, at_frame: state.frame_index };
+				log::warn!(target: "aetherment", "Failed drawing egui, switching to imgui runtime path");
+				target_egui = false;
+			}
 		}
 	}
+
+	if !target_egui {
+		state.ui_backend_runtime = UiBackendRuntime::ImguiActive;
+	}
+
+	0
+}
+
+#[no_mangle]
+pub extern "C" fn ui_backend_mode_get(state: *mut State) -> u8 {
+	let state = unsafe{&mut *state};
+	state.ui_backend_mode as u8
+}
+
+#[no_mangle]
+pub extern "C" fn ui_backend_mode_set(state: *mut State, mode: u8) {
+	let state = unsafe{&mut *state};
+	state.ui_backend_mode = match mode {
+		1 => UiBackendMode::ForceEgui,
+		2 => UiBackendMode::ForceImgui,
+		_ => UiBackendMode::Auto,
+	};
+	state.ui_backend_runtime = match state.ui_backend_mode {
+		UiBackendMode::ForceImgui => UiBackendRuntime::ImguiActive,
+		_ => UiBackendRuntime::EguiActive,
+	};
+}
+
+#[no_mangle]
+pub extern "C" fn ui_backend_last_failure_len(state: *mut State) -> usize {
+	let state = unsafe{&mut *state};
+	state.ui_backend_last_failure.len()
+}
+
+#[no_mangle]
+pub extern "C" fn ui_backend_last_failure_ptr(state: *mut State) -> *const u8 {
+	let state = unsafe{&mut *state};
+	state.ui_backend_last_failure.as_ptr()
 }
 
 #[no_mangle]

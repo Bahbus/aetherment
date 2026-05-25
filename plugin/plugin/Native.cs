@@ -78,6 +78,10 @@ public static class Native {
 	[DllImport("aetherment_core.dll")] public static extern unsafe nint draw(nint state, nint d3d11_device, Io io);
 	[DllImport("aetherment_core.dll")] public static extern unsafe void tick(nint state);
 	[DllImport("aetherment_core.dll")] public static extern unsafe byte config_plugin_open_on_launch(nint state);
+	[DllImport("aetherment_core.dll")] public static extern unsafe byte ui_backend_mode_get(nint state);
+	[DllImport("aetherment_core.dll")] public static extern unsafe void ui_backend_mode_set(nint state, byte mode);
+	[DllImport("aetherment_core.dll")] public static extern unsafe nint ui_backend_last_failure_ptr(nint state);
+	[DllImport("aetherment_core.dll")] public static extern unsafe nint ui_backend_last_failure_len(nint state);
 	[DllImport("aetherment_core.dll")] public static extern unsafe void backend_penumbraipc_modchanged(nint state, byte type, FFI.Str collection_id, FFI.Str mod_id);
 	[DllImport("aetherment_core.dll")] public static extern unsafe byte backend_penumbraipc_drawsettings(nint state, FFI.Str mod_id);
 }
