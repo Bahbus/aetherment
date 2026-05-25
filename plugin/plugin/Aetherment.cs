@@ -21,9 +21,10 @@ public class Aetherment: IDalamudPlugin {
 	// Dalamud ApiLevel 15 expects plugin configs used with GetPluginConfig/SavePluginConfig
 	// to implement IPluginConfiguration and expose a Version property for schema versioning.
 	private class Config : IPluginConfiguration {
-		// Keep this at 1 for the current schema (UiBackendMode only).
-		public int Version { get; set; } = 1;
+		public int Version { get; set; } = 2;
 		public byte UiBackendMode { get; set; } = 0;
+		public string LastEguiFailureSignature { get; set; } = "";
+		public bool AutoStartImguiAfterFailure { get; set; } = false;
 	}
 
 	public string Name => "Aetherment";
@@ -174,6 +175,8 @@ public class Aetherment: IDalamudPlugin {
 			state = Native.initialize(init);
 			open = Native.config_plugin_open_on_launch(state) != 0;
 			Native.ui_backend_mode_set(state, config.UiBackendMode);
+			if(config.UiBackendMode == 0 && config.AutoStartImguiAfterFailure && !string.IsNullOrEmpty(config.LastEguiFailureSignature))
+				Native.ui_backend_auto_start_imgui_after_failure_set(state, 1);
 		} catch(Exception e) {
 			Kill($"{e.GetBaseException().Message}\n\n{e}", 2);
 		}
@@ -259,6 +262,12 @@ public class Aetherment: IDalamudPlugin {
 				Interface.SavePluginConfig(config);
 			}
 
+			bool autoStartImgui = config.AutoStartImguiAfterFailure;
+			if(ImGui.Checkbox("Auto-start ImGui after egui failure", ref autoStartImgui)) {
+				config.AutoStartImguiAfterFailure = autoStartImgui;
+				Interface.SavePluginConfig(config);
+			}
+
 			var failurePtr = Native.ui_backend_last_failure_ptr(state);
 			int failureLen = (int)Native.ui_backend_last_failure_len(state);
 			var failure = failurePtr != 0 && failureLen > 0 ? Marshal.PtrToStringUTF8(failurePtr, failureLen) : "";
@@ -269,6 +278,10 @@ public class Aetherment: IDalamudPlugin {
 			var signature = sigPtr != 0 && sigLen > 0 ? Marshal.PtrToStringUTF8(sigPtr, sigLen) : "";
 			if(!string.IsNullOrEmpty(signature))
 				ImGui.TextWrapped($"Last Egui Signature: {signature}");
+			if(config.LastEguiFailureSignature != signature) {
+				config.LastEguiFailureSignature = signature ?? "";
+				Interface.SavePluginConfig(config);
+			}
 			if(ImGui.Button("Copy UI Diagnostics")) {
 				var payload = string.IsNullOrEmpty(signature) ? failure : $"{signature}\n{failure}";
 				if(!string.IsNullOrEmpty(payload)) {
@@ -279,6 +292,8 @@ public class Aetherment: IDalamudPlugin {
 
 			bool forceImgui = backendMode == 2;
 			bool imguiActive = Native.ui_backend_runtime_get(state) == 1;
+			if(ImGui.Button("Retry egui now"))
+				Native.ui_backend_retry_egui_once(state);
 			if(forceImgui || imguiActive)
 				DrawImguiFallbackUi();
 			else
