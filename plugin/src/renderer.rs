@@ -399,7 +399,7 @@ impl Renderer {
 					match mesh.texture_id {
 						egui::TextureId::Managed(id) => {
 							if let Some(tex) = self.textures.get(&id) {
-								self.d3d11_ctx.PSSetSamplers(1, Some(&[Some(tex.sampler.clone())]));
+								self.d3d11_ctx.PSSetSamplers(0, Some(&[Some(tex.sampler.clone())]));
 								self.d3d11_ctx.PSSetShaderResources(0, Some(&[Some(tex.sview.clone())]));
 							}
 						}
@@ -408,6 +408,9 @@ impl Renderer {
 							let ptr = ptr as _;
 							let view = ID3D11ShaderResourceView::from_raw_borrowed(&ptr).unwrap();
 							self.d3d11_ctx.PSSetShaderResources(0, Some(&[Some(view.clone())]));
+							if let Some(tex) = self.textures.get(&0) {
+								self.d3d11_ctx.PSSetSamplers(0, Some(&[Some(tex.sampler.clone())]));
+							}
 						}
 					}
 					
@@ -434,9 +437,9 @@ impl Renderer {
 		}
 		
 		let mut cmdlist = None;
-		self.d3d11_ctx.FinishCommandList(true, Some(&mut cmdlist))?;
+		self.d3d11_ctx.FinishCommandList(false, Some(&mut cmdlist))?;
 		let cmdlist = cmdlist.unwrap();
-		device.GetImmediateContext()?.ExecuteCommandList(Some(&cmdlist), true);
+		device.GetImmediateContext()?.ExecuteCommandList(Some(&cmdlist), false);
 		self.d3d11_ctx.ClearState();
 		
 		Ok(self.rt.view_ptr() as _)
