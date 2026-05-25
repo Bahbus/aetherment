@@ -56,6 +56,7 @@ public class Aetherment: IDalamudPlugin {
 	private UiColor uicolor;
 	private TexFinder texfinder;
 	private Config config;
+	private string fallbackCommandInput = "";
 	
 	private static nint device;
 	
@@ -240,6 +241,9 @@ public class Aetherment: IDalamudPlugin {
 	}
 	
 	private void Draw() {
+		// Fallback UI ownership contract:
+		// - Rust `draw()` only drives backend/runtime state transitions.
+		// - C# owns the full ImGui fallback interface rendered in this window.
 		if(open) {
 			ImGui.SetNextWindowPos(new Vector2(50), ImGuiCond.FirstUseEver);
 			ImGui.SetNextWindowSize(new Vector2(200), ImGuiCond.FirstUseEver);
@@ -276,7 +280,7 @@ public class Aetherment: IDalamudPlugin {
 			bool forceImgui = backendMode == 2;
 			bool imguiActive = Native.ui_backend_runtime_get(state) == 1;
 			if(forceImgui || imguiActive)
-				ImGui.TextWrapped("Using ImGui fallback renderer.");
+				DrawImguiFallbackUi();
 			else
 				DrawNative(Native.draw);
 			ImGui.End();
@@ -286,6 +290,31 @@ public class Aetherment: IDalamudPlugin {
 		Native.tick(state);
 		
 		texfinder.Draw();
+	}
+
+	private void DrawImguiFallbackUi() {
+		ImGui.SeparatorText("ImGui Fallback");
+		ImGui.TextWrapped("Egui is unavailable for this session. Use these controls to access plugin actions.");
+
+		if(ImGui.Button(texfinder.shoulddraw ? "Hide Texture Finder" : "Open Texture Finder"))
+			texfinder.shoulddraw = !texfinder.shoulddraw;
+
+		ImGui.SameLine();
+		if(ImGui.Button("Copy UI Diagnostics"))
+			OnCommand(diagcommand, "");
+
+		if(ImGui.CollapsingHeader("Command Runner", ImGuiTreeNodeFlags.DefaultOpen)) {
+			ImGui.TextWrapped("Run backend commands without egui. Leave blank to toggle the main window state.");
+			ImGui.InputText("##fallback-command", ref fallbackCommandInput, 512);
+			ImGui.SameLine();
+			if(ImGui.Button("Run")) {
+				try {
+					Native.command(state, fallbackCommandInput ?? "");
+				} catch(Exception e) {
+					Kill($"Fatal error in ImGui fallback command runner\n\n{e}", 1);
+				}
+			}
+		}
 	}
 	
 	public static void DrawNative(Func<nint, nint, Io, nint> draw) {
