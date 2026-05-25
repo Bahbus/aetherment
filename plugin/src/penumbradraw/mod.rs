@@ -210,6 +210,12 @@ impl PenumbraDraw {
 		
 		true
 	}
+
+	pub fn draw(&mut self, ui_scale: f32, mod_id: &str) -> bool {
+		// Backend-agnostic path: all interactive controls are routed through
+		// the local imgui helper primitives in `penumbradraw/imgui.rs`.
+		self.settings(ui_scale, mod_id)
+	}
 }
 
 fn draw_description(_mod_id: &str, text: &str) {

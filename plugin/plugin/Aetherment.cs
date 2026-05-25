@@ -250,7 +250,12 @@ public class Aetherment: IDalamudPlugin {
 			if(failurePtr != 0 && failureLen > 0)
 				ImGui.TextWrapped($"Last Egui Failure: {Marshal.PtrToStringUTF8(failurePtr, failureLen)}");
 
-			DrawNative(Native.draw);
+			bool forceImgui = backendMode == 2;
+			bool imguiActive = Native.ui_backend_runtime_get(state) == 1;
+			if(forceImgui || imguiActive)
+				ImGui.TextWrapped("Using ImGui fallback renderer.");
+			else
+				DrawNative(Native.draw);
 			ImGui.End();
 		}
 		
