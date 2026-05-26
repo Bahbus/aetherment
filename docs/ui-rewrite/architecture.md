@@ -1,56 +1,185 @@
-# Aetherment UI Rewrite Architecture
+# UI Rewrite Architecture
 
-## Module boundaries
+## Purpose
+This document defines the target architecture for the UI rewrite and the boundaries between modules so implementation can be parallelized safely.
 
-The plugin UI internals are now organized into three layers:
+---
 
-1. **Domain / services** (`aetherment/src/view/mods_layers/domain.rs`)
-   - Owns operations that mutate external systems or shared backend state.
-   - Exposes `ModsDomainOps` as an explicit interface for UI-triggered actions (apply queue, enable/disable, import, finalize apply, redraw).
-   - Default implementation `BackendModsDomain` adapts existing backend calls.
+## Layer 1: Domain / Services
 
-2. **View-model / state orchestration** (`aetherment/src/view/mods_layers/state.rs`)
-   - Owns UI-independent state for the Mods workflow (`ModsViewModel`).
-   - Owns validation and derived-state helpers (e.g. preset name validation, category selection normalization).
-   - Contains no rendering calls and no direct backend calls.
+**Responsibility:**
+Business logic only. This layer defines the application rules and state transitions independent of UI framework details.
 
-3. **KamiToolKit views (render + binding)** (`aetherment/src/view/mods_layers/views.rs` and `aetherment/src/view/mods.rs`)
-   - Performs rendering and binds user input to view-model/domain interfaces.
-   - Delegates side effects through `ModsDomainOps` instead of calling backend APIs directly for UI-triggered operations.
+**Contains:**
+- Domain entities and value objects
+- Use-case services (application services)
+- Policy/decision logic
+- Stable interfaces (ports) for external concerns (configuration, filesystem, IPC)
 
-## Dependency direction rules
+**Must not contain:**
+- UI rendering code
+- View-model shape decisions tied to components
+- Framework event objects
+- Direct filesystem/IPC calls (except via injected ports/interfaces)
 
-Dependencies must remain one-directional:
+---
 
-- `views` -> `state`
-- `views` -> `domain` (via `ModsDomainOps`)
-- `state` -X-> `views`
-- `domain` -X-> `views`
-- `state` -X-> direct backend / filesystem / remote integration
+## Layer 2: View-model / State
 
-Practical rule: any code that needs `egui` widgets stays in views; any code that needs irreversible side effects must be represented in domain interfaces.
+**Responsibility:**
+Translate domain capabilities into UI-facing state and commands.
 
-## Side-effect boundaries
+**Contains:**
+- Screen/store state models
+- Commands/actions and command orchestration
+- Derived/computed state
+- Input normalization and validation rules for user workflows
+- Mapping between domain models and presentation models
 
-### Plugin config access
+**Must not contain:**
+- Rendering implementation (KamiToolKit widgets/layout)
+- Direct filesystem/IPC calls
+- Domain rule duplication already owned by services
 
-- **Allowed in view-model orchestration only for local selection/state derivation**.
-- Persisting user configuration should be mediated through explicit domain/service interfaces in future migrations.
-- Current transitional usage in `mods.rs` should be gradually migrated behind interfaces.
+---
 
-### Filesystem access
+## Layer 3: KamiToolKit View
 
-- **Allowed only in domain/services**.
-- UI may collect file paths (input binding), but actual file processing/import execution must happen through domain methods (`import_mods`).
+**Responsibility:**
+Rendering and event binding only.
 
-### External integrations (backend, IPC, notifications)
+**Contains:**
+- KamiToolKit component composition/layout
+- Styling and visual hierarchy
+- Binding user events to view-model commands
+- Display-only formatting that does not alter business logic
 
-- **Allowed only in domain/services** for operations initiated by UI.
-- Views call abstract operations (`ModsDomainOps`) and avoid direct integration calls for these triggers.
-- Future UIs (web, CLI, tests) can reuse behavior by swapping `ModsDomainOps` implementations.
+**Must not contain:**
+- Business logic decisions
+- Cross-screen state orchestration
+- Validation logic beyond immediate field-level affordances delegated to view-model
+- Filesystem/IPC/configuration access
 
-## Migration notes
+---
 
-- This change introduces a first vertical slice for the Mods feature and is intentionally incremental.
-- Additional features (presets, notifications, remote settings, collection management) should follow the same separation pattern.
-- During migration, preserve functional parity by moving logic behind interfaces before changing behavior.
+## Dependency Rules (One-way)
+
+Dependency direction is strictly downward in abstraction:
+
+1. **View (Layer 3) -> View-model (Layer 2)**
+2. **View-model (Layer 2) -> Domain/Services (Layer 1)**
+3. **Domain/Services (Layer 1) -> Ports/abstractions only**
+
+No reverse imports are allowed.
+
+### Allowed dependencies
+- Layer 3 may reference Layer 2 public interfaces/types needed for rendering and event wiring.
+- Layer 2 may reference Layer 1 services/entities/use-cases.
+- Layer 1 may reference shared primitives and abstract ports (interfaces) only.
+
+### Forbidden couplings
+- Layer 1 importing any UI or KamiToolKit module.
+- Layer 1 importing concrete filesystem/IPC/config implementations.
+- Layer 2 importing Layer 3 components/widgets.
+- Layer 3 importing Layer 1 directly (must go through Layer 2).
+- Any layer reaching across boundaries through global singletons that bypass defined interfaces.
+
+---
+
+## Configuration, Filesystem, and IPC Placement
+
+These concerns are **infrastructure** and must be isolated.
+
+- **Configuration read/write:**
+  - Concrete access allowed only in infrastructure adapters/composition root.
+  - Domain receives configuration values via constructor/input parameters or domain-facing interfaces.
+
+- **Filesystem access:**
+  - Concrete file I/O allowed only in infrastructure adapters implementing domain/view-model ports.
+  - View-model and domain must depend on interfaces, not direct file APIs.
+
+- **IPC (process/app boundary):**
+  - Concrete IPC clients/servers allowed only in infrastructure adapter modules.
+  - View-model invokes IPC-backed behavior through service interfaces.
+  - Views never call IPC directly.
+
+---
+
+## Migration Diagram
+
+```text
+Current (mixed responsibilities)
+
+[Legacy UI + state + logic + IO]
+              |
+              v
+Target (layered)
+
++-----------------------------+
+| Layer 3: KamiToolKit View   |
+| - Render                    |
+| - Event binding             |
++-------------+---------------+
+              |
+              v
++-----------------------------+
+| Layer 2: View-model/State   |
+| - Commands                  |
+| - Derived state             |
+| - Validation                |
++-------------+---------------+
+              |
+              v
++-----------------------------+
+| Layer 1: Domain/Services    |
+| - Business rules            |
+| - Use-cases                 |
+| - Ports                     |
++-------------+---------------+
+              |
+              v
++-----------------------------+
+| Infrastructure Adapters     |
+| - Config                    |
+| - Filesystem                |
+| - IPC                       |
++-----------------------------+
+```
+
+Migration sequence:
+1. Extract domain rules from legacy UI into Layer 1 services.
+2. Introduce Layer 2 view-models that wrap Layer 1 use-cases.
+3. Rebuild UI screens in Layer 3 using KamiToolKit against Layer 2 contracts.
+4. Route config/filesystem/IPC through adapters and inject via composition root.
+5. Remove legacy direct couplings once replacement paths are stable.
+
+---
+
+## Module Ownership (for Parallel Assignment)
+
+To avoid overlap, assign work by module boundary:
+
+### Team A: Domain/Services
+- Owns domain entities, service APIs, and business rule tests.
+- Defines required ports for external dependencies.
+- Does **not** edit KamiToolKit view modules.
+
+### Team B: View-model/State
+- Owns command handlers, derived-state calculators, validators, and state store contracts.
+- Integrates with domain service interfaces.
+- Does **not** implement concrete filesystem/IPC/config adapters.
+
+### Team C: KamiToolKit View
+- Owns component layout, event wiring, and visual state presentation.
+- Consumes view-model public APIs only.
+- Does **not** encode business rules or persistence behavior.
+
+### Team D: Infrastructure/Composition
+- Owns concrete adapters for configuration, filesystem, IPC, and dependency wiring.
+- Implements ports defined by Domain/Services.
+- Exposes initialized services/view-model factories to app startup.
+
+### Cross-team contract process
+- Public interfaces are versioned and reviewed by owning team.
+- Breaking interface changes require a migration note and staged rollout plan.
+- Ownership map is authoritative for task creation to prevent file-level contention.
